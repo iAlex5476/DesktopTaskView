@@ -439,42 +439,35 @@ namespace DesktopTaskView
             public static bool IsDesktopPoint(Point point)
             {
                 IntPtr hwnd = WindowFromPoint(new POINT { x = point.X, y = point.Y });
-
-                while (hwnd != IntPtr.Zero)
+                if (hwnd == IntPtr.Zero)
                 {
-                    string className = GetWindowClassName(hwnd);
+                    return false;
+                }
 
-                    if (className == "Progman" ||
-                        className == "WorkerW" ||
-                        className == "SHELLDLL_DefView")
+                IntPtr current = hwnd;
+                bool sawDesktopView = false;
+
+                while (current != IntPtr.Zero)
+                {
+                    string className = GetWindowClassName(current);
+
+                    if (className == "SysListView32" || className == "SHELLDLL_DefView")
+                    {
+                        sawDesktopView = true;
+                    }
+
+                    if ((className == "Progman" || className == "WorkerW") && sawDesktopView)
                     {
                         return true;
                     }
 
-                    if (className == "SysListView32")
-                    {
-                        IntPtr parent = GetParent(hwnd);
-                        if (parent != IntPtr.Zero && GetWindowClassName(parent) == "SHELLDLL_DefView")
-                        {
-                            return true;
-                        }
-                    }
-
-                    IntPtr parentWindow = GetParent(hwnd);
+                    IntPtr parentWindow = GetParent(current);
                     if (parentWindow == IntPtr.Zero)
                     {
-                        IntPtr root = GetAncestor(hwnd, GA_ROOT);
-                        if (root == hwnd)
-                        {
-                            break;
-                        }
+                        break;
+                    }
 
-                        hwnd = root;
-                    }
-                    else
-                    {
-                        hwnd = parentWindow;
-                    }
+                    current = parentWindow;
                 }
 
                 return false;
