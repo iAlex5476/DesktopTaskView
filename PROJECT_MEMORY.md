@@ -11,7 +11,7 @@ Repository name on GitHub: `DesktopTaskView`
 Current local folder:
 
 ```text
-C:\Users\Alex\Documents\Codex\2026-05-04\windows11-macos
+D:\Dev\DesktopTaskView
 ```
 
 ## Current Version
