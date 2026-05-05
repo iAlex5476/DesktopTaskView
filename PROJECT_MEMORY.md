@@ -16,7 +16,7 @@ D:\Dev\DesktopTaskView
 
 ## Current Version
 
-Latest version: `v0.2.0`
+Latest version: `v0.3.0`
 
 `v0.1.0` was the first public release.
 
@@ -26,6 +26,11 @@ Latest version: `v0.2.0`
 adjustable click timing, an excluded-process list, configurable hotkeys, an auto-start toggle
 in the tray menu, and a runtime-drawn custom tray icon. The strict desktop hit test from
 v0.1.1 is preserved.
+
+`v0.3.0` fixed two P0 bugs: (1) maximized windows now restore to maximized state via
+`WINDOWPLACEMENT` / `SetWindowPlacement`; (2) clicking a desktop icon no longer triggers
+"minimize all" — cross-process `LVM_HITTEST` (VirtualAllocEx/WriteProcessMemory/ReadProcessMemory)
+correctly distinguishes icon clicks from empty-desktop clicks.
 
 ## Current Behavior
 

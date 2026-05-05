@@ -1,5 +1,30 @@
 # Release Notes
 
+## v0.3.0 — Bug fixes: maximize restore + desktop icon detection
+
+### Fixed
+
+- **Maximized windows now restore correctly.** Previously, a maximized browser,
+  IDE, or video player would come back as a normal-sized window after
+  minimize/restore. The fix saves each window's full `WINDOWPLACEMENT` before
+  minimizing and restores with `SetWindowPlacement`, so maximized windows come
+  back maximized and normal windows come back at their original position and size.
+
+- **Clicking a desktop icon no longer triggers "minimize all".** When
+  `SysListView32` (the desktop icon grid) was hit, the old code returned
+  true immediately, so a single click on any desktop icon would silently
+  minimize everything. The fix sends `LVM_HITTEST` into explorer.exe's address
+  space via `VirtualAllocEx` / `WriteProcessMemory` / `ReadProcessMemory` and
+  skips the minimize action when an icon item is under the cursor.
+
+### SHA-256 (v0.3.0)
+
+```
+DesktopTaskView.exe   E8A8A944F3997AC96546D8AF6BEFDF03B76045930D8EDCF22B73694A77BAC17B
+```
+
+---
+
 ## v0.2.0 — Settings, customization, auto-start
 
 This is the first feature-bearing release after the v0.1.x click-detection fixes.

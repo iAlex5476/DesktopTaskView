@@ -1,4 +1,4 @@
-// DesktopTaskView v0.2.0
+// DesktopTaskView v0.3.0
 // Single .cs file, builds with the .NET Framework 4.x csc.exe shipped with Windows.
 // MIT License. See LICENSE.
 
@@ -22,15 +22,15 @@ using Microsoft.Win32;
 [assembly: AssemblyCompany("DesktopTaskView")]
 [assembly: AssemblyProduct("DesktopTaskView")]
 [assembly: AssemblyCopyright("MIT License")]
-[assembly: AssemblyVersion("0.2.0.0")]
-[assembly: AssemblyFileVersion("0.2.0.0")]
+[assembly: AssemblyVersion("0.3.0.0")]
+[assembly: AssemblyFileVersion("0.3.0.0")]
 
 namespace DesktopTaskView
 {
     internal static class Program
     {
         public const string AppName = "DesktopTaskView";
-        public const string Version = "0.2.0";
+        public const string Version = "0.3.0";
 
         [STAThread]
         private static void Main()
@@ -402,7 +402,8 @@ namespace DesktopTaskView
     // ---------------------------------------------------------------------
     internal sealed class WindowMinimizer
     {
-        private readonly List<IntPtr> _minimized = new List<IntPtr>();
+        private readonly List<KeyValuePair<IntPtr, Native.WINDOWPLACEMENT>> _minimized
+            = new List<KeyValuePair<IntPtr, Native.WINDOWPLACEMENT>>();
         private HashSet<string> _excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         public void SetExcluded(HashSet<string> excluded)
@@ -467,8 +468,13 @@ namespace DesktopTaskView
                 int ex = Native.GetWindowLong(hwnd, Native.GWL_EXSTYLE);
                 if ((ex & Native.WS_EX_TOOLWINDOW) != 0) return true;
 
-                if (Native.ShowWindowAsync(hwnd, Native.SW_MINIMIZE))
-                    _minimized.Add(hwnd);
+                var wp = new Native.WINDOWPLACEMENT();
+                wp.length = Marshal.SizeOf(typeof(Native.WINDOWPLACEMENT));
+                if (Native.GetWindowPlacement(hwnd, ref wp) &&
+                    Native.ShowWindowAsync(hwnd, Native.SW_MINIMIZE))
+                {
+                    _minimized.Add(new KeyValuePair<IntPtr, Native.WINDOWPLACEMENT>(hwnd, wp));
+                }
 
                 return true;
             }, IntPtr.Zero);
@@ -476,12 +482,14 @@ namespace DesktopTaskView
 
         public void Restore()
         {
-            // Restore in reverse to keep z-order roughly stable
             for (int i = _minimized.Count - 1; i >= 0; i--)
             {
-                IntPtr h = _minimized[i];
-                if (Native.IsWindow(h) && Native.IsIconic(h))
-                    Native.ShowWindowAsync(h, Native.SW_RESTORE);
+                IntPtr h = _minimized[i].Key;
+                Native.WINDOWPLACEMENT wp = _minimized[i].Value;
+                if (!Native.IsWindow(h)) continue;
+                if (wp.showCmd == Native.SW_SHOWMINIMIZED)
+                    wp.showCmd = Native.SW_SHOWNORMAL;
+                Native.SetWindowPlacement(h, ref wp);
             }
             _minimized.Clear();
         }
@@ -625,24 +633,93 @@ namespace DesktopTaskView
             // Direct hit: Progman or WorkerW (no icons present)
             if (hitClass == "Progman" || hitClass == "WorkerW") return true;
 
-            // Indirect: SHELLDLL_DefView or SysListView32 -> ancestor must be Progman/WorkerW
-            // AND that root must be the actual desktop window (i.e., owns SHELLDLL_DefView).
+            // Must be SHELLDLL_DefView or SysListView32 to continue
             if (hitClass != "SHELLDLL_DefView" && hitClass != "SysListView32") return false;
 
+            // Walk ancestor chain to confirm this list view belongs to the real desktop host
+            bool isDesktopHost = false;
             IntPtr cur = hit;
             for (int i = 0; i < 8 && cur != IntPtr.Zero; i++)
             {
                 string c = GetClass(cur);
                 if (c == "Progman" || c == "WorkerW")
                 {
-                    // Must own a SHELLDLL_DefView child to be the desktop host.
                     IntPtr defView = Native.FindWindowEx(cur, IntPtr.Zero, "SHELLDLL_DefView", null);
-                    if (defView != IntPtr.Zero) return true;
-                    return false;
+                    if (defView != IntPtr.Zero) isDesktopHost = true;
+                    break;
                 }
                 cur = Native.GetParent(cur);
             }
-            return false;
+            if (!isDesktopHost) return false;
+
+            // P0-2: if the hit is on SysListView32, check whether a desktop icon was clicked.
+            // LVM_HITTEST lParam is a pointer that must live in explorer.exe's address space;
+            // use VirtualAllocEx/WriteProcessMemory/ReadProcessMemory for the cross-process call.
+            if (hitClass == "SysListView32")
+            {
+                var clientPt = new Native.POINT { x = pt.X, y = pt.Y };
+                if (Native.ScreenToClient(hit, ref clientPt))
+                {
+                    if (IsDesktopIconAt(hit, clientPt))
+                        return false;
+                }
+            }
+
+            return true;
+        }
+
+        // Returns true if a desktop icon item occupies the given client-coordinate point.
+        // Uses cross-process memory because LVM_HITTEST lParam must live in explorer.exe's heap.
+        private static bool IsDesktopIconAt(IntPtr listView, Native.POINT clientPt)
+        {
+            uint pid;
+            Native.GetWindowThreadProcessId(listView, out pid);
+            IntPtr hProcess = Native.OpenProcess(
+                Native.PROCESS_VM_OPERATION | Native.PROCESS_VM_READ | Native.PROCESS_VM_WRITE,
+                false, pid);
+            if (hProcess == IntPtr.Zero) return false;
+            try
+            {
+                int structSize = Marshal.SizeOf(typeof(Native.LVHITTESTINFO));
+                IntPtr remotePtr = Native.VirtualAllocEx(hProcess, IntPtr.Zero,
+                    (IntPtr)structSize, Native.MEM_COMMIT | Native.MEM_RESERVE, Native.PAGE_READWRITE);
+                if (remotePtr == IntPtr.Zero) return false;
+                try
+                {
+                    var hti = new Native.LVHITTESTINFO();
+                    hti.pt = clientPt;
+                    hti.flags = 0;
+                    hti.iItem = -1;
+                    hti.iSubItem = 0;
+                    hti.iGroup = 0;
+
+                    IntPtr localBuf = Marshal.AllocHGlobal(structSize);
+                    try
+                    {
+                        Marshal.StructureToPtr(hti, localBuf, false);
+                        IntPtr written;
+                        Native.WriteProcessMemory(hProcess, remotePtr, localBuf,
+                            (IntPtr)structSize, out written);
+                    }
+                    finally { Marshal.FreeHGlobal(localBuf); }
+
+                    Native.SendMessage(listView, Native.LVM_HITTEST, IntPtr.Zero, remotePtr);
+
+                    IntPtr readBuf = Marshal.AllocHGlobal(structSize);
+                    try
+                    {
+                        IntPtr bytesRead;
+                        Native.ReadProcessMemory(hProcess, remotePtr, readBuf,
+                            (IntPtr)structSize, out bytesRead);
+                        var result = (Native.LVHITTESTINFO)Marshal.PtrToStructure(
+                            readBuf, typeof(Native.LVHITTESTINFO));
+                        return (result.flags & Native.LVHT_ONITEM) != 0;
+                    }
+                    finally { Marshal.FreeHGlobal(readBuf); }
+                }
+                finally { Native.VirtualFreeEx(hProcess, remotePtr, 0, Native.MEM_RELEASE); }
+            }
+            finally { Native.CloseHandle(hProcess); }
         }
 
         private static string GetClass(IntPtr h)
@@ -1001,8 +1078,11 @@ namespace DesktopTaskView
         public const int WH_MOUSE_LL = 14;
         public const int WM_LBUTTONDOWN = 0x0201;
 
+        public const int SW_SHOWNORMAL    = 1;
+        public const int SW_SHOWMINIMIZED = 2;
+        public const int SW_SHOWMAXIMIZED = 3;
         public const int SW_MINIMIZE = 6;
-        public const int SW_RESTORE = 9;
+        public const int SW_RESTORE  = 9;
 
         public const int GWL_EXSTYLE = -20;
         public const int WS_EX_TOOLWINDOW = 0x00000080;
@@ -1015,6 +1095,42 @@ namespace DesktopTaskView
 
         [StructLayout(LayoutKind.Sequential)]
         public struct POINT { public int x; public int y; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RECT
+        {
+            public int left, top, right, bottom;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct WINDOWPLACEMENT
+        {
+            public int length;
+            public int flags;
+            public int showCmd;
+            public POINT ptMinPosition;
+            public POINT ptMaxPosition;
+            public RECT  rcNormalPosition;
+        }
+
+        public const int LVM_FIRST   = 0x1000;
+        public const int LVM_HITTEST = LVM_FIRST + 18;
+
+        public const uint LVHT_NOWHERE         = 0x00000001;
+        public const uint LVHT_ONITEMICON      = 0x00000002;
+        public const uint LVHT_ONITEMLABEL     = 0x00000004;
+        public const uint LVHT_ONITEMSTATEICON = 0x00000008;
+        public const uint LVHT_ONITEM          = LVHT_ONITEMICON | LVHT_ONITEMLABEL | LVHT_ONITEMSTATEICON;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct LVHITTESTINFO
+        {
+            public POINT pt;
+            public uint  flags;
+            public int   iItem;
+            public int   iSubItem;
+            public int   iGroup;
+        }
 
         [StructLayout(LayoutKind.Sequential)]
         public struct MSLLHOOKSTRUCT
@@ -1093,6 +1209,45 @@ namespace DesktopTaskView
         public static extern int DwmGetWindowAttribute(IntPtr hwnd, uint dwAttribute, out int pvAttribute, int cbAttribute);
 
         [DllImport("user32.dll")]
+        public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+
+        [DllImport("user32.dll")]
+        public static extern bool SetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+
+        [DllImport("user32.dll")]
+        public static extern bool ScreenToClient(IntPtr hWnd, ref POINT lpPoint);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
         public static extern bool DestroyIcon(IntPtr handle);
+
+        public const uint PROCESS_VM_OPERATION = 0x0008;
+        public const uint PROCESS_VM_READ      = 0x0010;
+        public const uint PROCESS_VM_WRITE     = 0x0020;
+
+        public const uint MEM_COMMIT    = 0x1000;
+        public const uint MEM_RESERVE   = 0x2000;
+        public const uint MEM_RELEASE   = 0x8000;
+        public const uint PAGE_READWRITE = 0x04;
+
+        [DllImport("kernel32.dll")]
+        public static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
+
+        [DllImport("kernel32.dll")]
+        public static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint flAllocationType, uint flProtect);
+
+        [DllImport("kernel32.dll")]
+        public static extern bool VirtualFreeEx(IntPtr hProcess, IntPtr lpAddress, int dwSize, uint dwFreeType);
+
+        [DllImport("kernel32.dll")]
+        public static extern bool WriteProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, IntPtr lpBuffer, IntPtr nSize, out IntPtr lpNumberOfBytesWritten);
+
+        [DllImport("kernel32.dll")]
+        public static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, IntPtr lpBuffer, IntPtr nSize, out IntPtr lpNumberOfBytesRead);
+
+        [DllImport("kernel32.dll")]
+        public static extern bool CloseHandle(IntPtr hObject);
     }
 }

@@ -18,12 +18,14 @@ already ships with Windows 10/11.
 
 ---
 
-## Features (v0.2.0)
+## Features (v0.3.0)
 
 | | |
 |---|---|
 | Single-click empty desktop | Minimize all visible top-level windows; restore them on the next single-click. |
 | Double-click empty desktop | Open Windows Task View (`Win + Tab`). |
+| Accurate maximize restore | Maximized windows come back maximized (uses `WINDOWPLACEMENT`; previously they returned to normal size). |
+| Desktop icon detection | Clicking a desktop icon no longer triggers minimize — cross-process `LVM_HITTEST` distinguishes icons from empty space. |
 | Strict desktop detection | `Progman` / `WorkerW` ancestry + `SHELLDLL_DefView` ownership check, so File Explorer file lists are not mistaken for the desktop. |
 | Settings UI | Toggles, click timing, hotkeys, and exclusions in a proper window. |
 | Persistent config | `%APPDATA%\DesktopTaskView\settings.ini`. |
