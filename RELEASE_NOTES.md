@@ -1,5 +1,20 @@
 # Release Notes
 
+## v0.3.1 — Remove hotkey module
+
+Removed the built-in hotkey system (`Ctrl+Alt+F11` / `Ctrl+Alt+F12`). Windows
+already provides `Win+D` and `Win+Tab`; the duplicate hotkeys added complexity
+without value. The Settings window no longer has hotkey fields.
+
+### SHA-256 (v0.3.1)
+
+```
+DesktopTaskView.exe          84080640D0596B6CBEF13181E4790309710BF200F327023EFFC62270E2E75F76
+DesktopTaskView-v0.3.1.zip   B9936BD1A7CAEB7F04558AD5EE7F5342938E09BD2B1113C6B5CCD8BCCB0CB3DB
+```
+
+---
+
 ## v0.3.0 — Bug fixes: maximize restore + desktop icon detection
 
 ### Fixed

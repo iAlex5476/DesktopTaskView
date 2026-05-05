@@ -1,4 +1,4 @@
-// DesktopTaskView v0.3.0
+// DesktopTaskView v0.3.1
 // Single .cs file, builds with the .NET Framework 4.x csc.exe shipped with Windows.
 // MIT License. See LICENSE.
 
@@ -22,15 +22,15 @@ using Microsoft.Win32;
 [assembly: AssemblyCompany("DesktopTaskView")]
 [assembly: AssemblyProduct("DesktopTaskView")]
 [assembly: AssemblyCopyright("MIT License")]
-[assembly: AssemblyVersion("0.3.0.0")]
-[assembly: AssemblyFileVersion("0.3.0.0")]
+[assembly: AssemblyVersion("0.3.1.0")]
+[assembly: AssemblyFileVersion("0.3.1.0")]
 
 namespace DesktopTaskView
 {
     internal static class Program
     {
         public const string AppName = "DesktopTaskView";
-        public const string Version = "0.3.0";
+        public const string Version = "0.3.1";
 
         [STAThread]
         private static void Main()
@@ -66,8 +66,6 @@ namespace DesktopTaskView
         public bool MinimizeOnSingleClick { get; set; }
         public bool TaskViewOnDoubleClick { get; set; }
         public string ExcludedProcesses { get; set; } // comma-separated, lowercase, no .exe
-        public string HotkeyToggleDesktop { get; set; }
-        public string HotkeyTaskView { get; set; }
 
         public static string FilePath
         {
@@ -91,8 +89,6 @@ namespace DesktopTaskView
                 MinimizeOnSingleClick = true,
                 TaskViewOnDoubleClick = true,
                 ExcludedProcesses = "",
-                HotkeyToggleDesktop = "Ctrl+Alt+F11",
-                HotkeyTaskView = "Ctrl+Alt+F12",
             };
         }
 
@@ -118,8 +114,6 @@ namespace DesktopTaskView
                         case "MinimizeOnSingleClick": s.MinimizeOnSingleClick = ParseBool(val, s.MinimizeOnSingleClick); break;
                         case "TaskViewOnDoubleClick": s.TaskViewOnDoubleClick = ParseBool(val, s.TaskViewOnDoubleClick); break;
                         case "ExcludedProcesses": s.ExcludedProcesses = val; break;
-                        case "HotkeyToggleDesktop": s.HotkeyToggleDesktop = val; break;
-                        case "HotkeyTaskView": s.HotkeyTaskView = val; break;
                     }
                 }
             }
@@ -137,8 +131,6 @@ namespace DesktopTaskView
             sb.AppendLine("MinimizeOnSingleClick=" + MinimizeOnSingleClick);
             sb.AppendLine("TaskViewOnDoubleClick=" + TaskViewOnDoubleClick);
             sb.AppendLine("ExcludedProcesses=" + (ExcludedProcesses ?? ""));
-            sb.AppendLine("HotkeyToggleDesktop=" + (HotkeyToggleDesktop ?? ""));
-            sb.AppendLine("HotkeyTaskView=" + (HotkeyTaskView ?? ""));
             File.WriteAllText(FilePath, sb.ToString(), new UTF8Encoding(false));
         }
 
@@ -206,13 +198,12 @@ namespace DesktopTaskView
     }
 
     // ---------------------------------------------------------------------
-    // Tray context: owns icon, settings, mouse hook, hotkeys, message window
+    // Tray context: owns icon, settings, mouse hook
     // ---------------------------------------------------------------------
     internal sealed class TrayContext : ApplicationContext
     {
         private readonly NotifyIcon _tray;
         private readonly DesktopClickWatcher _watcher;
-        private readonly HotkeyHost _hotkeys;
         private readonly WindowMinimizer _minimizer = new WindowMinimizer();
         private AppSettings _settings;
         private SettingsForm _settingsForm;
@@ -237,9 +228,6 @@ namespace DesktopTaskView
             _watcher = new DesktopClickWatcher(this);
             _watcher.Apply(_settings);
             if (_settings.Enabled) _watcher.Start();
-
-            _hotkeys = new HotkeyHost(this);
-            _hotkeys.Apply(_settings);
         }
 
         public AppSettings Settings { get { return _settings; } }
@@ -252,7 +240,6 @@ namespace DesktopTaskView
             _minimizer.SetExcluded(_settings.ExcludedSet());
             _watcher.Apply(_settings);
             if (_settings.Enabled) _watcher.Start(); else _watcher.Stop();
-            _hotkeys.Apply(_settings);
             RefreshMenu();
         }
 
@@ -338,7 +325,6 @@ namespace DesktopTaskView
         private void ExitApp()
         {
             try { _watcher.Stop(); } catch { }
-            try { _hotkeys.Dispose(); } catch { }
             try { _tray.Visible = false; _tray.Dispose(); } catch { }
             Application.Exit();
         }
@@ -349,7 +335,6 @@ namespace DesktopTaskView
             {
                 try { _tray.Visible = false; _tray.Dispose(); } catch { }
                 try { _watcher.Stop(); } catch { }
-                try { _hotkeys.Dispose(); } catch { }
             }
             base.Dispose(disposing);
         }
@@ -756,124 +741,6 @@ namespace DesktopTaskView
     }
 
     // ---------------------------------------------------------------------
-    // Hotkeys: hidden message window registers WM_HOTKEY
-    // ---------------------------------------------------------------------
-    internal sealed class HotkeyHost : IDisposable
-    {
-        private readonly TrayContext _ctx;
-        private readonly HotkeyWindow _win;
-        private int _idToggleDesktop = -1;
-        private int _idTaskView = -1;
-        private static int _nextId = 0xB100;
-
-        public HotkeyHost(TrayContext ctx)
-        {
-            _ctx = ctx;
-            _win = new HotkeyWindow(this);
-        }
-
-        public void Apply(AppSettings s)
-        {
-            UnregisterAll();
-
-            uint mod1, vk1;
-            if (TryParse(s.HotkeyToggleDesktop, out mod1, out vk1))
-            {
-                _idToggleDesktop = Interlocked.Increment(ref _nextId);
-                Native.RegisterHotKey(_win.Handle, _idToggleDesktop, mod1, vk1);
-            }
-            uint mod2, vk2;
-            if (TryParse(s.HotkeyTaskView, out mod2, out vk2))
-            {
-                _idTaskView = Interlocked.Increment(ref _nextId);
-                Native.RegisterHotKey(_win.Handle, _idTaskView, mod2, vk2);
-            }
-        }
-
-        public void OnHotkey(int id)
-        {
-            if (id == _idToggleDesktop) _ctx.Minimizer.Toggle();
-            else if (id == _idTaskView) DesktopActions.OpenTaskView();
-        }
-
-        private void UnregisterAll()
-        {
-            if (_idToggleDesktop > 0) { Native.UnregisterHotKey(_win.Handle, _idToggleDesktop); _idToggleDesktop = -1; }
-            if (_idTaskView > 0) { Native.UnregisterHotKey(_win.Handle, _idTaskView); _idTaskView = -1; }
-        }
-
-        public void Dispose()
-        {
-            UnregisterAll();
-            try { _win.DestroyHandle(); } catch { }
-        }
-
-        public static bool TryParse(string spec, out uint mods, out uint vk)
-        {
-            mods = 0; vk = 0;
-            if (string.IsNullOrWhiteSpace(spec)) return false;
-            var parts = spec.Split('+');
-            foreach (var raw in parts)
-            {
-                string p = raw.Trim();
-                if (p.Length == 0) continue;
-                switch (p.ToLowerInvariant())
-                {
-                    case "ctrl":
-                    case "control": mods |= 0x0002; break;
-                    case "alt": mods |= 0x0001; break;
-                    case "shift": mods |= 0x0004; break;
-                    case "win":
-                    case "windows": mods |= 0x0008; break;
-                    default:
-                        if (!TryParseKey(p, out vk)) return false;
-                        break;
-                }
-            }
-            return vk != 0;
-        }
-
-        private static bool TryParseKey(string p, out uint vk)
-        {
-            vk = 0;
-            // Fn keys
-            if (p.Length >= 2 && (p[0] == 'F' || p[0] == 'f'))
-            {
-                int n;
-                if (int.TryParse(p.Substring(1), out n) && n >= 1 && n <= 24)
-                {
-                    vk = (uint)(0x70 + (n - 1)); // VK_F1..F24
-                    return true;
-                }
-            }
-            // Single chars 0-9 / A-Z
-            if (p.Length == 1)
-            {
-                char c = char.ToUpperInvariant(p[0]);
-                if (c >= '0' && c <= '9') { vk = (uint)c; return true; }
-                if (c >= 'A' && c <= 'Z') { vk = (uint)c; return true; }
-            }
-            return false;
-        }
-
-        private sealed class HotkeyWindow : NativeWindow
-        {
-            private const int WM_HOTKEY = 0x0312;
-            private readonly HotkeyHost _owner;
-            public HotkeyWindow(HotkeyHost owner)
-            {
-                _owner = owner;
-                CreateHandle(new CreateParams());
-            }
-            protected override void WndProc(ref Message m)
-            {
-                if (m.Msg == WM_HOTKEY) _owner.OnHotkey(m.WParam.ToInt32());
-                base.WndProc(ref m);
-            }
-        }
-    }
-
-    // ---------------------------------------------------------------------
     // Settings UI
     // ---------------------------------------------------------------------
     internal sealed class SettingsForm : Form
@@ -888,8 +755,6 @@ namespace DesktopTaskView
         private NumericUpDown _numDouble;
         private NumericUpDown _numDelay;
         private TextBox _txtExcluded;
-        private TextBox _txtHotkeyToggle;
-        private TextBox _txtHotkeyTaskView;
 
         public SettingsForm(TrayContext ctx, AppSettings current)
         {
@@ -902,8 +767,6 @@ namespace DesktopTaskView
                 MinimizeOnSingleClick = current.MinimizeOnSingleClick,
                 TaskViewOnDoubleClick = current.TaskViewOnDoubleClick,
                 ExcludedProcesses = current.ExcludedProcesses,
-                HotkeyToggleDesktop = current.HotkeyToggleDesktop,
-                HotkeyTaskView = current.HotkeyTaskView,
             };
 
             Text = Program.AppName + " - Settings";
@@ -911,7 +774,7 @@ namespace DesktopTaskView
             MaximizeBox = false;
             MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(440, 460);
+            ClientSize = new Size(440, 360);
             Icon = IconFactory.Build();
             Font = SystemFonts.MessageBoxFont;
 
@@ -954,27 +817,6 @@ namespace DesktopTaskView
                 Left = 12, Top = y, Width = 416, ForeColor = SystemColors.GrayText, AutoSize = false,
             };
             Controls.Add(lblExcludedHint);
-            y += 18;
-
-            AddLabel("Hotkey - Toggle Desktop:", 12, y, labelW);
-            _txtHotkeyToggle = new TextBox { Left = inputX, Top = y - 3, Width = 200 };
-            Controls.Add(_txtHotkeyToggle);
-            y += 28;
-
-            AddLabel("Hotkey - Task View:", 12, y, labelW);
-            _txtHotkeyTaskView = new TextBox { Left = inputX, Top = y - 3, Width = 200 };
-            Controls.Add(_txtHotkeyTaskView);
-            y += 30;
-
-            var lblHelp = new Label
-            {
-                Text = "Hotkey format: Ctrl+Alt+F11   |   Modifiers: Ctrl, Alt, Shift, Win.\n" +
-                       "Empty = no hotkey. Restart not required.",
-                Left = 12, Top = y, Width = 416, Height = 36,
-                ForeColor = SystemColors.GrayText,
-            };
-            Controls.Add(lblHelp);
-            y += 40;
 
             var btnOk = new Button { Text = "Save", Left = 252, Top = ClientSize.Height - 36, Width = 80 };
             btnOk.Click += OnSaveClicked;
@@ -1014,8 +856,6 @@ namespace DesktopTaskView
             _numDouble.Value = Math.Max(_numDouble.Minimum, Math.Min(_numDouble.Maximum, _working.DoubleClickMs));
             _numDelay.Value = Math.Max(_numDelay.Minimum, Math.Min(_numDelay.Maximum, _working.SingleClickDelayMs));
             _txtExcluded.Text = (_working.ExcludedProcesses ?? "").Replace(",", Environment.NewLine);
-            _txtHotkeyToggle.Text = _working.HotkeyToggleDesktop ?? "";
-            _txtHotkeyTaskView.Text = _working.HotkeyTaskView ?? "";
         }
 
         private void LoadFromDefaults()
@@ -1027,29 +867,10 @@ namespace DesktopTaskView
             _numDouble.Value = d.DoubleClickMs;
             _numDelay.Value = d.SingleClickDelayMs;
             _txtExcluded.Text = "";
-            _txtHotkeyToggle.Text = d.HotkeyToggleDesktop;
-            _txtHotkeyTaskView.Text = d.HotkeyTaskView;
         }
 
         private void OnSaveClicked(object sender, EventArgs e)
         {
-            // Validate hotkeys early so user gets feedback
-            uint m, v;
-            if (!string.IsNullOrWhiteSpace(_txtHotkeyToggle.Text) &&
-                !HotkeyHost.TryParse(_txtHotkeyToggle.Text, out m, out v))
-            {
-                MessageBox.Show("Toggle Desktop hotkey is invalid.\nExample: Ctrl+Alt+F11",
-                    "Invalid hotkey", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-            if (!string.IsNullOrWhiteSpace(_txtHotkeyTaskView.Text) &&
-                !HotkeyHost.TryParse(_txtHotkeyTaskView.Text, out m, out v))
-            {
-                MessageBox.Show("Task View hotkey is invalid.\nExample: Ctrl+Alt+F12",
-                    "Invalid hotkey", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
             _working.Enabled = _cbEnabled.Checked;
             _working.MinimizeOnSingleClick = _cbMinimizeSingle.Checked;
             _working.TaskViewOnDoubleClick = _cbTaskViewDouble.Checked;
@@ -1058,8 +879,6 @@ namespace DesktopTaskView
             _working.ExcludedProcesses = string.Join(",",
                 _txtExcluded.Text.Split(new[] { '\r', '\n', ',' }, StringSplitOptions.RemoveEmptyEntries)
                     .Select(s => s.Trim()).Where(s => s.Length > 0));
-            _working.HotkeyToggleDesktop = _txtHotkeyToggle.Text.Trim();
-            _working.HotkeyTaskView = _txtHotkeyTaskView.Text.Trim();
 
             Startup.SetEnabled(_cbAutoStart.Checked);
             _ctx.ApplySettings(_working);
@@ -1198,12 +1017,6 @@ namespace DesktopTaskView
 
         [DllImport("user32.dll")]
         public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
         [DllImport("dwmapi.dll")]
         public static extern int DwmGetWindowAttribute(IntPtr hwnd, uint dwAttribute, out int pvAttribute, int cbAttribute);
