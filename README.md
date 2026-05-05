@@ -18,7 +18,7 @@ already ships with Windows 10/11.
 
 ---
 
-## Features (v0.3.0)
+## Features (v0.3.1)
 
 | | |
 |---|---|
@@ -27,12 +27,11 @@ already ships with Windows 10/11.
 | Accurate maximize restore | Maximized windows come back maximized (uses `WINDOWPLACEMENT`; previously they returned to normal size). |
 | Desktop icon detection | Clicking a desktop icon no longer triggers minimize — cross-process `LVM_HITTEST` distinguishes icons from empty space. |
 | Strict desktop detection | `Progman` / `WorkerW` ancestry + `SHELLDLL_DefView` ownership check, so File Explorer file lists are not mistaken for the desktop. |
-| Settings UI | Toggles, click timing, hotkeys, and exclusions in a proper window. |
+| Settings UI | Toggles, click timing, and exclusions in a proper window. |
 | Persistent config | `%APPDATA%\DesktopTaskView\settings.ini`. |
 | Excluded apps | Comma-separated list of process names that won't be minimized. |
 | Custom tray icon | Drawn at runtime, no external `.ico` file. |
 | Auto-start toggle | Writes to `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. |
-| Configurable hotkeys | Default `Ctrl+Alt+F11` (toggle desktop) and `Ctrl+Alt+F12` (Task View). |
 | Single instance | Named mutex prevents accidental duplicates. |
 | DPI-aware | `SetProcessDPIAware()` at startup. |
 
@@ -74,15 +73,6 @@ trust the build, or build it yourself from source (instructions below).
 The single-click behavior intentionally waits a few ms after the click —
 that's the **single-click delay** in Settings — so a fast double-click is
 recognized as a double-click and not as two independent single-clicks.
-
-### Hotkeys (defaults; rebindable in Settings)
-
-| Hotkey | Action |
-|---|---|
-| `Ctrl + Alt + F11` | Minimize / restore (same as single-click). |
-| `Ctrl + Alt + F12` | Open Task View (same as double-click). |
-
-Leave a hotkey field blank in Settings to disable that hotkey.
 
 ### Excluded processes
 
@@ -134,7 +124,7 @@ The runtime architecture is intentionally small. Everything lives in
 - **`Program.Main`** — single-instance check, DPI awareness, runs the tray
   context.
 - **`TrayContext`** — `ApplicationContext` that owns the tray icon, the
-  settings, the click watcher, and the hotkey host.
+  settings, and the click watcher.
 - **`AppSettings`** — INI-style load/save under `%APPDATA%`. No JSON
   dependency.
 - **`DesktopClickWatcher`** — `WH_MOUSE_LL` low-level mouse hook. On
@@ -150,8 +140,6 @@ The runtime architecture is intentionally small. Everything lives in
   shell/tray/cloaked/excluded/empty-title/tool windows, minimizes the
   rest, and remembers what it minimized so a second click can restore
   exactly that set (and not whatever the user minimized manually).
-- **`HotkeyHost`** — hidden `NativeWindow` subclass that receives
-  `WM_HOTKEY` for the registered global hotkeys.
 - **`SettingsForm`** — WinForms dialog bound to a working copy of the
   settings; on Save it pushes back into `TrayContext` which re-applies
   everything live.
